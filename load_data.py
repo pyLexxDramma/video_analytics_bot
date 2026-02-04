@@ -7,6 +7,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def parse_datetime(date_str):
+    if isinstance(date_str, str):
+        return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+    return date_str
+
 async def load_json_to_db(json_path: str, db_url: str):
     conn = await asyncpg.connect(db_url)
     
@@ -16,7 +21,7 @@ async def load_json_to_db(json_path: str, db_url: str):
         
         videos = data.get('videos', [])
         
-        for video in videos:
+        for idx, video in enumerate(videos):
             video_id = video['id']
             await conn.execute("""
                 INSERT INTO videos (id, creator_id, video_created_at, views_count, 
@@ -29,10 +34,10 @@ async def load_json_to_db(json_path: str, db_url: str):
                     comments_count = EXCLUDED.comments_count,
                     reports_count = EXCLUDED.reports_count,
                     updated_at = EXCLUDED.updated_at
-            """, video_id, video['creator_id'], video['video_created_at'],
+            """, video_id, video['creator_id'], parse_datetime(video['video_created_at']),
                 video['views_count'], video['likes_count'], 
                 video['comments_count'], video['reports_count'],
-                video['created_at'], video['updated_at'])
+                parse_datetime(video['created_at']), parse_datetime(video['updated_at']))
             
             snapshots = video.get('snapshots', [])
             for snapshot in snapshots:
@@ -56,8 +61,11 @@ async def load_json_to_db(json_path: str, db_url: str):
                     snapshot['likes_count'], snapshot['comments_count'],
                     snapshot['reports_count'], snapshot['delta_views_count'],
                     snapshot['delta_likes_count'], snapshot['delta_comments_count'],
-                    snapshot['delta_reports_count'], snapshot['created_at'],
-                    snapshot['updated_at'])
+                    snapshot['delta_reports_count'], parse_datetime(snapshot['created_at']),
+                    parse_datetime(snapshot['updated_at']))
+            
+            if (idx + 1) % 100 == 0:
+                print(f"Обработано {idx + 1}/{len(videos)} видео...")
         
         print(f"Загружено {len(videos)} видео")
         

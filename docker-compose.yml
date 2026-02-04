@@ -25,7 +25,8 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/video_analytics
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
     volumes:
       - ./videos.json:/app/videos.json:ro
     restart: unless-stopped

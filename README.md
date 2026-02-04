@@ -1,133 +1,206 @@
 # Telegram-бот для аналитики по видео
 
-Telegram-бот для получения статистики по видео на основе запросов на естественном языке.
+Telegram-бот для получения статистики по видео на основе запросов на естественном языке. Бот преобразует вопросы на русском языке в SQL запросы с помощью LLM и возвращает числовые результаты.
 
 ## Технологии
 
-- Python 3.11+
-- PostgreSQL
-- aiogram 3.x (асинхронный Telegram бот)
-- OpenAI API (GPT-4o-mini) для преобразования запросов в SQL
-- asyncpg для работы с БД
+- **Python 3.11+**
+- **PostgreSQL** - реляционная база данных
+- **aiogram 3.x** - асинхронный фреймворк для Telegram ботов
+- **Ollama** - локальная LLM для преобразования запросов в SQL
+- **asyncpg** - асинхронный драйвер для PostgreSQL
+- **httpx** - асинхронный HTTP клиент для запросов к Ollama API
 
-## Установка
+## Быстрый старт
 
-1. Клонируйте репозиторий:
+### Локальный запуск (без Docker)
+
+1. **Клонируйте репозиторий:**
 ```bash
 git clone <repository_url>
 cd video-analytics-bot
 ```
 
-2. Установите зависимости:
+2. **Установите зависимости:**
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Создайте файл `.env` на основе `.env.example`:
+3. **Настройте переменные окружения:**
+
+Создайте файл `.env` на основе `.env.example`:
 ```bash
 cp .env.example .env
 ```
 
-4. Заполните переменные окружения в `.env`:
-- `TELEGRAM_BOT_TOKEN` - токен вашего Telegram бота (получить у @BotFather)
-  - Создайте бота через [@BotFather](https://t.me/BotFather) в Telegram
-  - Используйте команду `/newbot` и следуйте инструкциям
-  - Скопируйте полученный токен в `.env`
-- `OPENAI_API_KEY` - API ключ OpenAI
-  - Получите ключ на [platform.openai.com](https://platform.openai.com/api-keys)
-- `DATABASE_URL` - строка подключения к PostgreSQL (формат: `postgresql://user:password@host:port/database`)
+Заполните переменные в `.env`:
+```env
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=gemma3:4b
+DATABASE_URL=postgresql://user:password@localhost:5432/video_analytics
+```
 
-## Настройка базы данных
+**Как получить токен Telegram-бота:**
+- Откройте Telegram и найдите [@BotFather](https://t.me/BotFather)
+- Отправьте команду `/newbot` и следуйте инструкциям
+- Скопируйте полученный токен в файл `.env`
 
-1. Создайте базу данных PostgreSQL:
+4. **Настройте базу данных:**
+
+Создайте базу данных PostgreSQL:
 ```sql
 CREATE DATABASE video_analytics;
 ```
 
-2. Примените миграции:
+Примените миграции:
 ```bash
 psql -d video_analytics -f migrations/001_create_tables.sql
 ```
 
-Или через Python:
-```python
-import asyncio
-from database import Database
-from os import getenv
-from dotenv import load_dotenv
+5. **Загрузите данные:**
 
-load_dotenv()
-db = Database(getenv('DATABASE_URL'))
-
-async def migrate():
-    await db.connect()
-    await db.execute_migration('migrations/001_create_tables.sql')
-    await db.close()
-
-asyncio.run(migrate())
-```
-
-3. Загрузите данные из JSON файла:
 ```bash
 python load_data.py path/to/videos.json
 ```
 
-## Запуск бота
+6. **Запустите Ollama:**
 
+Ollama должна быть запущена для работы бота:
+```bash
+ollama serve
+```
+
+Убедитесь, что установлена модель (указанная в `OLLAMA_MODEL`):
+```bash
+ollama pull gemma3:4b
+```
+
+7. **Запустите бота:**
 ```bash
 python bot.py
 ```
 
-Бот будет отвечать на текстовые сообщения, преобразуя их в SQL запросы и возвращая числовые результаты.
+### Запуск через Docker
+
+1. **Создайте файл `.env`** (см. выше)
+
+2. **Поместите файл `videos.json`** в корневую директорию проекта
+
+3. **Запустите через Docker Compose:**
+```bash
+docker-compose up -d
+```
+
+4. **Примените миграции:**
+```bash
+docker-compose exec postgres psql -U postgres -d video_analytics -f /docker-entrypoint-initdb.d/001_create_tables.sql
+```
+
+5. **Загрузите данные:**
+```bash
+docker-compose exec bot python load_data.py /app/videos.json
+```
+
+Бот будет автоматически запущен. Логи:
+```bash
+docker-compose logs -f bot
+```
 
 ## Архитектура
 
 ### Технологический стек
 
 Проект полностью асинхронный:
-- **aiogram 3.x** - асинхронный фреймворк для Telegram ботов
-- **asyncpg** - асинхронный драйвер для PostgreSQL
-- **AsyncOpenAI** - асинхронный клиент для OpenAI API
-- **asyncio** - для управления асинхронными операциями
+- **aiogram 3.x** - обработка сообщений Telegram
+- **asyncpg** - асинхронные запросы к PostgreSQL
+- **httpx** - асинхронные HTTP запросы к Ollama API
+- **asyncio** - управление асинхронными операциями
 
-Все операции (запросы к БД, запросы к LLM, обработка сообщений) выполняются асинхронно, что обеспечивает высокую производительность.
+Все операции (запросы к БД, запросы к LLM, обработка сообщений) выполняются асинхронно.
 
-### Преобразование запросов в SQL
+### Подход к преобразованию запросов в SQL
 
-Бот использует OpenAI GPT-4o-mini для преобразования вопросов на русском языке в SQL запросы.
+**Процесс обработки запроса:**
 
-**Подход:**
-1. Пользователь отправляет вопрос на русском языке
-2. Бот асинхронно отправляет запрос в LLM с описанием схемы БД
-3. LLM возвращает SQL запрос
+1. Пользователь отправляет вопрос на русском языке в Telegram
+2. Бот асинхронно отправляет HTTP запрос в Ollama API с промптом, содержащим:
+   - Описание схемы базы данных
+   - Правила преобразования русских дат
+   - Примеры SQL запросов
+   - Требование вернуть только SQL код
+3. Ollama возвращает SQL запрос
 4. Бот асинхронно выполняет SQL запрос к PostgreSQL через asyncpg
 5. Бот возвращает пользователю одно число (результат запроса)
 
-**Внутренняя логика:**
+**Особенности:**
 - Каждый запрос обрабатывается независимо
 - Контекст диалога не хранится
 - Один запрос → один числовой ответ
+- Валидация SQL запросов перед выполнением
 
-**Описание схемы данных:**
-LLM получает подробное описание структуры таблиц `videos` и `video_snapshots`, включая:
-- Названия таблиц и колонок
-- Типы данных
-- Связи между таблицами (FOREIGN KEY)
-- Особенности работы с датами и приращениями (delta_* поля)
-- Правила преобразования русских дат в SQL формат
+### Описание схемы данных для LLM
 
-**Промпт для LLM:**
-Промпт содержит:
-- Полное описание схемы БД (SCHEMA_DESCRIPTION)
-- Инструкции по обработке русских дат
-- Правила формирования SQL запросов
-- Требование возвращать только одно число через SELECT
-- Примеры преобразования дат ("28 ноября 2025" → '2025-11-28')
+LLM получает подробное описание структуры базы данных в промпте (`SCHEMA_DESCRIPTION` в `llm_query.py`):
+
+**Таблица `videos`:**
+- `id` (UUID) - уникальный идентификатор видео
+- `creator_id` (VARCHAR) - идентификатор создателя
+- `video_created_at` (TIMESTAMP) - дата публикации видео
+- `views_count`, `likes_count`, `comments_count`, `reports_count` (INTEGER) - текущие значения метрик
+- `created_at`, `updated_at` (TIMESTAMP) - служебные поля
+
+**Таблица `video_snapshots`:**
+- `id` (VARCHAR) - уникальный идентификатор снапшота
+- `video_id` (UUID) - ссылка на видео (FOREIGN KEY)
+- `views_count`, `likes_count`, `comments_count`, `reports_count` (INTEGER) - значения на момент замера
+- `delta_views_count`, `delta_likes_count`, `delta_comments_count`, `delta_reports_count` (INTEGER) - прирост за час
+- `created_at` (TIMESTAMP) - дата и время замера
+- `updated_at` (TIMESTAMP) - служебное поле
+
+**Правила работы с данными:**
+- Для подсчета видео используется `COUNT(*)` из таблицы `videos`
+- Для прироста метрик используется `SUM(delta_*)` из таблицы `video_snapshots`
+- Для уникальных видео используется `COUNT(DISTINCT video_id)`
+- Для фильтрации по дате используется `DATE(created_at) = 'YYYY-MM-DD'` или `BETWEEN`
+- Для фильтрации по дате публикации используется `DATE(video_created_at)`
+
+### Промпт для LLM
+
+Промпт (`PROMPT_TEMPLATE` в `llm_query.py`) содержит:
+
+1. **Описание схемы БД** - полная структура таблиц с типами данных и связями
+
+2. **Примеры SQL запросов** для всех типов вопросов:
+   - Подсчет общего количества видео
+   - Подсчет видео по креатору и дате публикации
+   - Подсчет видео по количеству просмотров
+   - Прирост просмотров за конкретную дату
+   - Уникальные видео с приростом
+   - Прирост других метрик (лайки, комментарии)
+   - Подсчет по диапазону дат
+
+3. **Правила преобразования русских дат:**
+   - "28 ноября 2025" → '2025-11-28'
+   - "с 1 по 5 ноября 2025" → BETWEEN '2025-11-01' AND '2025-11-05'
+
+4. **Критические требования:**
+   - Возвращать только SQL код без markdown разметки
+   - Запрос должен начинаться с SELECT
+   - Использовать `DATE()` для фильтрации по датам
+   - Возвращать одно число
+
+5. **Системное сообщение:**
+   - "Ты эксперт по SQL и PostgreSQL. Твоя задача - преобразовать вопрос на русском языке в SQL запрос."
+
+**Параметры запроса к Ollama:**
+- `temperature: 0.1` - низкая температура для детерминированных результатов
+- `num_predict: 500` - ограничение длины ответа
 
 ## Примеры запросов
 
 - "Сколько всего видео есть в системе?"
-- "Сколько видео у креатора с id ... вышло с 1 ноября 2025 по 5 ноября 2025 включительно?"
+- "Сколько видео у креатора с id abc123 вышло с 1 ноября 2025 по 5 ноября 2025 включительно?"
 - "Сколько видео набрало больше 100 000 просмотров за всё время?"
 - "На сколько просмотров в сумме выросли все видео 28 ноября 2025?"
 - "Сколько разных видео получали новые просмотры 27 ноября 2025?"
@@ -136,51 +209,26 @@ LLM получает подробное описание структуры та
 
 ```
 video-analytics-bot/
-├── bot.py                 # Основной файл бота
-├── database.py            # Класс для работы с БД
-├── llm_query.py           # Преобразование запросов в SQL через LLM
-├── load_data.py           # Скрипт загрузки JSON в БД
-├── requirements.txt       # Зависимости Python
-├── .env.example          # Пример файла с переменными окружения
+├── bot.py                      # Основной файл бота
+├── database.py                 # Класс для работы с БД (asyncpg)
+├── llm_query.py                # Преобразование запросов в SQL через Ollama
+├── load_data.py                # Скрипт загрузки JSON в БД
+├── requirements.txt            # Зависимости Python
+├── .env.example               # Пример файла с переменными окружения
+├── Dockerfile                  # Docker образ для бота
+├── docker-compose.yml          # Docker Compose конфигурация
 ├── migrations/
-│   └── 001_create_tables.sql  # SQL миграции
-└── README.md             # Документация
+│   └── 001_create_tables.sql  # SQL миграции для создания таблиц
+└── README.md                   # Документация
 ```
 
-## Запуск через Docker
+## Требования
 
-Проект включает готовые Docker файлы для удобного развертывания.
+- Python 3.11+
+- PostgreSQL 12+
+- Ollama (локально установленная)
+- Telegram бот токен (от @BotFather)
 
-1. Создайте файл `.env` в корне проекта:
-```bash
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-OPENAI_API_KEY=your_openai_api_key_here
-```
+## Лицензия
 
-2. Поместите файл `videos.json` в корневую директорию проекта
-
-3. Запустите через Docker Compose:
-```bash
-docker-compose up -d
-```
-
-4. Примените миграции (в отдельном терминале):
-```bash
-docker-compose exec postgres psql -U postgres -d video_analytics -f /docker-entrypoint-initdb.d/001_create_tables.sql
-```
-
-Или примените миграции вручную:
-```bash
-docker-compose exec postgres psql -U postgres -d video_analytics
-# Затем выполните SQL из migrations/001_create_tables.sql
-```
-
-5. Загрузите данные:
-```bash
-docker-compose exec bot python load_data.py /app/videos.json
-```
-
-Бот будет автоматически запущен и готов к работе. Логи можно посмотреть командой:
-```bash
-docker-compose logs -f bot
-```
+MIT
