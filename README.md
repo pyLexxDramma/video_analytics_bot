@@ -30,7 +30,11 @@ cp .env.example .env
 
 4. Заполните переменные окружения в `.env`:
 - `TELEGRAM_BOT_TOKEN` - токен вашего Telegram бота (получить у @BotFather)
+  - Создайте бота через [@BotFather](https://t.me/BotFather) в Telegram
+  - Используйте команду `/newbot` и следуйте инструкциям
+  - Скопируйте полученный токен в `.env`
 - `OPENAI_API_KEY` - API ключ OpenAI
+  - Получите ключ на [platform.openai.com](https://platform.openai.com/api-keys)
 - `DATABASE_URL` - строка подключения к PostgreSQL (формат: `postgresql://user:password@host:port/database`)
 
 ## Настройка базы данных
@@ -78,30 +82,47 @@ python bot.py
 
 ## Архитектура
 
+### Технологический стек
+
+Проект полностью асинхронный:
+- **aiogram 3.x** - асинхронный фреймворк для Telegram ботов
+- **asyncpg** - асинхронный драйвер для PostgreSQL
+- **AsyncOpenAI** - асинхронный клиент для OpenAI API
+- **asyncio** - для управления асинхронными операциями
+
+Все операции (запросы к БД, запросы к LLM, обработка сообщений) выполняются асинхронно, что обеспечивает высокую производительность.
+
 ### Преобразование запросов в SQL
 
 Бот использует OpenAI GPT-4o-mini для преобразования вопросов на русском языке в SQL запросы.
 
 **Подход:**
 1. Пользователь отправляет вопрос на русском языке
-2. Бот отправляет запрос в LLM с описанием схемы БД и примером вопроса
+2. Бот асинхронно отправляет запрос в LLM с описанием схемы БД
 3. LLM возвращает SQL запрос
-4. Бот выполняет SQL запрос к PostgreSQL
-5. Бот возвращает пользователю числовой результат
+4. Бот асинхронно выполняет SQL запрос к PostgreSQL через asyncpg
+5. Бот возвращает пользователю одно число (результат запроса)
+
+**Внутренняя логика:**
+- Каждый запрос обрабатывается независимо
+- Контекст диалога не хранится
+- Один запрос → один числовой ответ
 
 **Описание схемы данных:**
 LLM получает подробное описание структуры таблиц `videos` и `video_snapshots`, включая:
 - Названия таблиц и колонок
 - Типы данных
-- Связи между таблицами
-- Особенности работы с датами и приращениями
+- Связи между таблицами (FOREIGN KEY)
+- Особенности работы с датами и приращениями (delta_* поля)
+- Правила преобразования русских дат в SQL формат
 
-**Промпт:**
+**Промпт для LLM:**
 Промпт содержит:
-- Описание схемы БД
-- Инструкции по обработке дат
+- Полное описание схемы БД (SCHEMA_DESCRIPTION)
+- Инструкции по обработке русских дат
 - Правила формирования SQL запросов
-- Требование возвращать только одно число
+- Требование возвращать только одно число через SELECT
+- Примеры преобразования дат ("28 ноября 2025" → '2025-11-28')
 
 ## Примеры запросов
 
@@ -126,50 +147,40 @@ video-analytics-bot/
 └── README.md             # Документация
 ```
 
-## Docker (опционально)
+## Запуск через Docker
 
-Для запуска через Docker создайте `docker-compose.yml`:
+Проект включает готовые Docker файлы для удобного развертывания.
 
-```yaml
-version: '3.8'
-services:
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: video_analytics
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  bot:
-    build: .
-    depends_on:
-      - postgres
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/video_analytics
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-    volumes:
-      - ./videos.json:/app/videos.json
-
-volumes:
-  postgres_data:
+1. Создайте файл `.env` в корне проекта:
+```bash
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+OPENAI_API_KEY=your_openai_api_key_here
 ```
 
-И `Dockerfile`:
+2. Поместите файл `videos.json` в корневую директорию проекта
 
-```dockerfile
-FROM python:3.11-slim
+3. Запустите через Docker Compose:
+```bash
+docker-compose up -d
+```
 
-WORKDIR /app
+4. Примените миграции (в отдельном терминале):
+```bash
+docker-compose exec postgres psql -U postgres -d video_analytics -f /docker-entrypoint-initdb.d/001_create_tables.sql
+```
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+Или примените миграции вручную:
+```bash
+docker-compose exec postgres psql -U postgres -d video_analytics
+# Затем выполните SQL из migrations/001_create_tables.sql
+```
 
-COPY . .
+5. Загрузите данные:
+```bash
+docker-compose exec bot python load_data.py /app/videos.json
+```
 
-CMD ["python", "bot.py"]
+Бот будет автоматически запущен и готов к работе. Логи можно посмотреть командой:
+```bash
+docker-compose logs -f bot
 ```
