@@ -31,6 +31,14 @@ SCHEMA_DESCRIPTION = """
 - Для фильтрации по дате публикации видео: DATE(video_created_at) = 'YYYY-MM-DD' или BETWEEN
 - Преобразование русских дат: "28 ноября 2025" = '2025-11-28', "1 ноября 2025" = '2025-11-01', "5 ноября 2025" = '2025-11-05'
 
+КРИТИЧЕСКИ ВАЖНО - ВЫБОР ТАБЛИЦЫ:
+- Если вопрос про КРЕАТОРА (creator_id) или про ИТОГОВУЮ СТАТИСТИКУ → используй таблицу VIDEOS
+- Если вопрос про ЗАМЕРЫ, СНАПШОТЫ, ПРИРОСТ за период → используй таблицу VIDEO_SNAPSHOTS
+- Если вопрос про "по итоговой статистике", "всего", "набрали" → используй таблицу VIDEOS
+- Если вопрос про "замеры статистики", "прирост", "выросли за дату" → используй таблицу VIDEO_SNAPSHOTS
+- Для фильтрации по креатору используй: WHERE creator_id = 'id' (в таблице videos)
+- НЕ путай creator_id (в таблице videos) с video_id (в таблице video_snapshots)!
+
 ПРИМЕРЫ SQL ЗАПРОСОВ:
 
 1. Подсчет общего количества видео:
@@ -41,6 +49,11 @@ SCHEMA_DESCRIPTION = """
    - "Сколько видео у креатора с id abc123 вышло с 1 ноября 2025 по 5 ноября 2025 включительно?" → SELECT COUNT(*) FROM videos WHERE creator_id = 'abc123' AND DATE(video_created_at) BETWEEN '2025-11-01' AND '2025-11-05'
    - "Сколько видео у креатора с id X вышло с 1 по 5 ноября 2025?" → SELECT COUNT(*) FROM videos WHERE creator_id = 'X' AND DATE(video_created_at) BETWEEN '2025-11-01' AND '2025-11-05'
    - "Сколько видео у креатора abc вышло с 1 по 5 ноября?" → SELECT COUNT(*) FROM videos WHERE creator_id = 'abc' AND DATE(video_created_at) BETWEEN '2025-11-01' AND '2025-11-05'
+
+2a. Подсчет видео по креатору и количеству просмотров (ИТОГОВАЯ СТАТИСТИКА):
+   - "Сколько видео у креатора с id abc123 набрали больше 10000 просмотров по итоговой статистике?" → SELECT COUNT(*) FROM videos WHERE creator_id = 'abc123' AND views_count > 10000
+   - "Сколько видео у креатора с id X набрали больше 10 000 просмотров?" → SELECT COUNT(*) FROM videos WHERE creator_id = 'X' AND views_count > 10000
+   - "Сколько видео у креатора abc имеет более 5000 просмотров?" → SELECT COUNT(*) FROM videos WHERE creator_id = 'abc' AND views_count > 5000
 
 3. Подсчет видео по количеству просмотров:
    - "Сколько видео набрало больше 100000 просмотров за всё время?" → SELECT COUNT(*) FROM videos WHERE views_count > 100000
@@ -98,7 +111,11 @@ PROMPT_TEMPLATE = f"""{SCHEMA_DESCRIPTION}
 2. Если вопрос про количество видео у КРЕАТОРА за ПЕРИОД → 
    SELECT COUNT(*) FROM videos WHERE creator_id = 'id' AND DATE(video_created_at) BETWEEN 'дата1' AND 'дата2'
 
-3. Если вопрос про количество видео с определенным количеством ПРОСМОТРОВ → 
+2a. Если вопрос про количество видео у КРЕАТОРА с определенным количеством ПРОСМОТРОВ (по итоговой статистике) → 
+   SELECT COUNT(*) FROM videos WHERE creator_id = 'id' AND views_count > число
+   ВАЖНО: используй таблицу VIDEOS, а не video_snapshots! Используй creator_id, а не video_id!
+
+3. Если вопрос про количество видео с определенным количеством ПРОСМОТРОВ (без упоминания креатора) → 
    SELECT COUNT(*) FROM videos WHERE views_count > число
 
 4. Если вопрос про ПРИРОСТ просмотров за КОНКРЕТНУЮ ДАТУ → 
