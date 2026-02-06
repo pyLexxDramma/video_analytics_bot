@@ -64,11 +64,24 @@ async def load_json_to_db(json_path: str, db_url: str):
                     snapshot['delta_reports_count'], parse_datetime(snapshot['created_at']),
                     parse_datetime(snapshot['updated_at']))
             
-            if (idx + 1) % 100 == 0:
-                print(f"Обработано {idx + 1}/{len(videos)} видео...")
-        
-        print(f"Загружено {len(videos)} видео")
-        
+            await conn.execute("""
+                UPDATE videos SET
+                    views_count = s.views_count,
+                    likes_count = s.likes_count,
+                    comments_count = s.comments_count,
+                    reports_count = s.reports_count,
+                    updated_at = NOW()
+                FROM (
+                    SELECT views_count, likes_count, comments_count, reports_count
+                    FROM video_snapshots
+                    WHERE video_id = $1
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ) s
+                WHERE id = $1
+            """, video_id)
+        print(len(videos))
+
     finally:
         await conn.close()
 
@@ -77,6 +90,5 @@ if __name__ == '__main__':
     json_path = sys.argv[1] if len(sys.argv) > 1 else 'videos.json'
     db_url = getenv('DATABASE_URL')
     if not db_url:
-        print("Ошибка: не указан DATABASE_URL")
         sys.exit(1)
     asyncio.run(load_json_to_db(json_path, db_url))
